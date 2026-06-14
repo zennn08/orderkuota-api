@@ -26,7 +26,11 @@ const app = new Hono();
 app.use('*', cors());
 app.onError(onError);
 
-// Docs (open or guarded by config).
+// Docs. Public by default; when DOCS_PUBLIC=false, guard them with the API key.
+if (!config.docsPublic) {
+  app.use('/openapi.json', apiKeyGuard(config.apiKey));
+  app.use('/docs', apiKeyGuard(config.apiKey));
+}
 app.get('/openapi.json', (c) => c.json(openApiDoc));
 app.get('/docs', swaggerUI({ url: '/openapi.json' }));
 
