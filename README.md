@@ -73,6 +73,7 @@ Variabel environment dibaca dari `.env` (lihat `.env.example`).
 | `PORT`        | Tidak | `3000`             | Port HTTP server.                                                |
 | `DB_PATH`     | Tidak | `./data/orkut.db`  | Lokasi file SQLite.                                              |
 | `DOCS_PUBLIC` | Tidak | `true`             | Bila `false`, dokumentasi tidak diekspos secara publik.          |
+| `PROXY_URL`   | Tidak | —                  | Proxy keluar untuk request ke OrderKuota. Satu URL, atau beberapa dipisah koma untuk rotasi round-robin (proxy yang gagal dilewati 60 detik). Kosong = koneksi langsung. |
 
 Contoh `.env`:
 
@@ -81,6 +82,8 @@ API_KEY=ganti-dengan-secret-anda
 PORT=3000
 DB_PATH=./data/orkut.db
 DOCS_PUBLIC=true
+# Satu proxy, atau beberapa dipisah koma untuk rotasi:
+PROXY_URL=http://user:pass@proxy1:8080,http://user:pass@proxy2:8080
 ```
 
 ---
