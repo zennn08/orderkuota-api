@@ -1,4 +1,5 @@
 import { ApiError } from '../types.ts';
+import { getDefaultPool } from './proxyRotator.ts';
 
 const OK_LOGIN_ENDPOINT = 'https://app.orderkuota.com/api/v2/login';
 const OK_GET_ENDPOINT = 'https://app.orderkuota.com/api/v2/get';
@@ -23,25 +24,46 @@ const OK_CONSTANTS = {
 const TIMEOUT_MS = 30_000;
 const MAX_RETRIES = 3;
 
+/** Marker so we can tell a non-2xx response apart from a transport error. */
+class UpstreamStatusError extends Error {}
+
 async function postForm(url: string, fields: Record<string, string>): Promise<unknown> {
   const body = new URLSearchParams(fields).toString();
+  const pool = getDefaultPool();
+  // With a pool, give every proxy a chance to serve the request before
+  // giving up; without one, keep the original retry budget.
+  const attempts = pool ? Math.max(MAX_RETRIES, pool.size()) : MAX_RETRIES;
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    let proxy: string | null = null;
+    if (pool) {
+      proxy = pool.next();
+      if (!proxy) {
+        throw new ApiError('UPSTREAM_ERROR', 'All proxies are currently unhealthy', 502);
+      }
+    }
     try {
       const res = await fetch(url, {
         method: 'POST',
         headers: OK_HEADERS,
         body,
         signal: AbortSignal.timeout(TIMEOUT_MS),
+        ...(proxy ? { proxy } : {}),
       });
       if (!res.ok) {
-        throw new Error(`Upstream HTTP ${res.status}`);
+        throw new UpstreamStatusError(`Upstream HTTP ${res.status}`);
       }
       return await res.json();
     } catch (err) {
       lastError = err as Error;
-      if (attempt < MAX_RETRIES - 1) {
+      // A non-2xx response could come from either the proxy or the target,
+      // so we don't penalise the proxy. Any other throw is a transport-level
+      // failure (dial/TLS/timeout) — mark this proxy bad and rotate on.
+      if (proxy && !(err instanceof UpstreamStatusError)) {
+        pool!.markBad(proxy);
+      }
+      if (attempt < attempts - 1) {
         await Bun.sleep(2 ** attempt * 1000);
       }
     }
