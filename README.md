@@ -289,6 +289,26 @@ Response:
 > mengembalikan `status` = `expired` dan baris dihapus, sehingga suffix-nya
 > bisa dipakai ulang.
 
+### Pencocokan pembayaran (anti dobel-deteksi)
+
+`check` tidak sekadar mencari mutasi dengan nominal yang sama. Setiap mutasi
+OrderKuota diikat ke **satu** transaksi:
+
+- **Klaim per `id` mutasi** — `id` mutasi yang sudah dipakai melunasi sebuah
+  transaksi disimpan di `paid_transactions.mutation_id`, dan mutasi yang sudah
+  diklaim akan dilewati. Index `UNIQUE(username, mutation_id)` menjadi penjaga
+  atomik: **satu pembayaran hanya bisa melunasi satu transaksi**. Tanpa ini,
+  dua transaksi dengan `final_amount` sama (mis. setelah suffix dipakai ulang)
+  bisa sama-sama terdeteksi `paid` oleh satu kali pembayaran.
+- **Filter waktu** — mutasi yang lebih lama dari `created_at` transaksi ditolak
+  (timestamp `tanggal` OrderKuota diperlakukan sebagai **WIB / UTC+7**, dengan
+  grace 5 menit untuk selisih jam). Ini mencegah pembayaran lama di riwayat
+  mencocoki transaksi yang baru dibuat. Bila `tanggal` gagal diparse, sistem
+  jatuh kembali ke proteksi klaim saja.
+
+`check` melakukan klaim **sebelum** menghapus baris pending; bila kalah dalam
+race klaim, transaksi tetap `pending` (tidak hilang).
+
 ---
 
 ## Cara Mendapatkan QRIS Static & Token
@@ -331,7 +351,7 @@ Tabel:
 | Tabel                  | Isi                                                                 |
 |------------------------|---------------------------------------------------------------------|
 | `pending_transactions` | Transaksi yang menunggu pembayaran (id, username, base/final amount, unique_suffix, qris_string, created_at, expires_at). |
-| `paid_transactions`    | Transaksi yang sudah dibayar (id, username, final_amount, paid_at, expires_at). |
+| `paid_transactions`    | Transaksi yang sudah dibayar (id, username, final_amount, paid_at, expires_at, `mutation_id`). `mutation_id` mengikat satu mutasi OrderKuota ke satu transaksi (lihat "Pencocokan pembayaran"); kolomnya ditambahkan otomatis via migrasi pada database lama. |
 
 **Cleanup otomatis**: baris yang melewati `expires_at` dihapus secara periodik
 **tiap 60 detik** (interval di `src/index.ts`) dan juga **saat alokasi suffix**

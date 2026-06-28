@@ -44,9 +44,17 @@ export function deletePending(db: Database, id: string): void {
 
 export function createPaid(db: Database, tx: PaidTransaction): void {
   db.query(
-    `INSERT INTO paid_transactions (id, username, final_amount, paid_at, expires_at)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(tx.id, tx.username, tx.final_amount, tx.paid_at, tx.expires_at);
+    `INSERT INTO paid_transactions (id, username, final_amount, paid_at, expires_at, mutation_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(tx.id, tx.username, tx.final_amount, tx.paid_at, tx.expires_at, tx.mutation_id ?? null);
+}
+
+/** Mutation ids already claimed by paid transactions for a username. */
+export function getClaimedMutationIds(db: Database, username: string): Set<number> {
+  const rows = db
+    .query('SELECT mutation_id FROM paid_transactions WHERE username = ? AND mutation_id IS NOT NULL')
+    .all(username) as { mutation_id: number }[];
+  return new Set(rows.map((r) => r.mutation_id));
 }
 
 export function getPaid(db: Database, id: string): PaidTransaction | null {

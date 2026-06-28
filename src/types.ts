@@ -21,6 +21,8 @@ export interface PaidTransaction {
   final_amount: number;
   paid_at: number;
   expires_at: number;
+  /** OrderKuota mutation id that paid this transaction (null for legacy rows). */
+  mutation_id?: number | null;
 }
 
 export type PaymentStatus = 'pending' | 'paid' | 'expired' | 'not_found';

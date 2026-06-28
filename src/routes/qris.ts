@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { generateSchema, checkSchema, imageSchema } from '../schemas.ts';
 import { generateDynamicQris } from '../services/qris.ts';
 import { getQrisHistory } from '../services/orderkuota.ts';
+import { findUnclaimedPayment } from '../services/mutation.ts';
 import { getDb } from '../db/client.ts';
 import {
   getAvailableSuffix,
@@ -13,6 +14,7 @@ import {
   deletePending,
   createPaid,
   getPaid,
+  getClaimedMutationIds,
 } from '../db/transactions.ts';
 
 const EXPIRY_SECONDS = 600; // 10 minutes
@@ -83,30 +85,37 @@ export function makeQrisRoute(dbPath: string): Hono {
       [];
     const history = Array.isArray(historyData) ? historyData : [];
 
-    const found = history.find((h: Record<string, unknown>) => {
-      const kreditStr = String(h.kredit ?? '').replace(/\./g, '');
-      const amt = parseInt(kreditStr, 10) || 0;
-      return amt === tx.final_amount && h.status === 'IN';
+    const pendingResponse = c.json({
+      success: true,
+      data: { status: 'pending', final_amount: tx.final_amount, expires_in: tx.expires_at - now },
     });
 
-    if (found) {
-      deletePending(db, transaction_id);
+    const match = findUnclaimedPayment(history, {
+      finalAmount: tx.final_amount,
+      createdAt: tx.created_at,
+      claimedIds: getClaimedMutationIds(db, username),
+    });
+    if (!match) return pendingResponse;
+
+    // Claim the mutation first; the UNIQUE(username, mutation_id) index makes
+    // this the atomic gate so one payment can settle only one transaction.
+    try {
       createPaid(db, {
         id: transaction_id,
         username,
         final_amount: tx.final_amount,
         paid_at: now,
         expires_at: now + PAID_EXPIRY_SECONDS,
+        mutation_id: match.id,
       });
-      return c.json({
-        success: true,
-        data: { status: 'paid', final_amount: tx.final_amount, paid_at: now },
-      });
+    } catch {
+      // Another transaction already claimed this mutation — this one is unpaid.
+      return pendingResponse;
     }
-
+    deletePending(db, transaction_id);
     return c.json({
       success: true,
-      data: { status: 'pending', final_amount: tx.final_amount, expires_in: tx.expires_at - now },
+      data: { status: 'paid', final_amount: tx.final_amount, paid_at: now },
     });
   });
 
