@@ -9,6 +9,7 @@ import {
   createPaid,
   getPaid,
   cleanupExpired,
+  getClaimedMutationIds,
 } from '../src/db/transactions.ts';
 
 let db: Database;
@@ -56,6 +57,35 @@ describe('paid lifecycle', () => {
   test('create and get', () => {
     createPaid(db, { id: 'p', username: 'OK123', final_amount: 10001, paid_at: 50, expires_at: 9_999_999_999 });
     expect(getPaid(db, 'p')?.final_amount).toBe(10001);
+  });
+
+  test('stores and reports the claimed mutation id', () => {
+    createPaid(db, {
+      id: 'p', username: 'OK123', final_amount: 10001,
+      paid_at: 50, expires_at: 9_999_999_999, mutation_id: 555,
+    });
+    expect(getClaimedMutationIds(db, 'OK123')).toEqual(new Set([555]));
+  });
+
+  test('claimed ids are scoped per username', () => {
+    createPaid(db, {
+      id: 'p', username: 'OK123', final_amount: 10001,
+      paid_at: 50, expires_at: 9_999_999_999, mutation_id: 555,
+    });
+    expect(getClaimedMutationIds(db, 'OTHER')).toEqual(new Set());
+  });
+
+  test('a mutation id cannot be claimed twice for the same user', () => {
+    createPaid(db, {
+      id: 'p1', username: 'OK123', final_amount: 10001,
+      paid_at: 50, expires_at: 9_999_999_999, mutation_id: 555,
+    });
+    expect(() =>
+      createPaid(db, {
+        id: 'p2', username: 'OK123', final_amount: 10001,
+        paid_at: 60, expires_at: 9_999_999_999, mutation_id: 555,
+      }),
+    ).toThrow();
   });
 });
 
